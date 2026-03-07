@@ -1,0 +1,16 @@
+type Campaign @entity(immutable: true) {
+  id: ID!
+  owner: Bytes!
+  targetAmount: BigInt!
+  deadline: BigInt!
+  metadataCID: String!
+  createdAtBlock: BigInt!
+}
+
+type Donation @entity(immutable: true) {
+  id: ID!
+  campaign: Campaign!
+  from: Bytes!
+  amount: BigInt!
+  blockNumber: BigInt!
+}
