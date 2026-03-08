@@ -5,6 +5,7 @@ import { useState, useRef } from "react";
 import FactoryAbi from "@/abi/CampaignFactory.json";
 import Link from "next/link";
 import { uploadFileToPinata, uploadJsonToPinata } from "@/lib/ipfs";
+import { parseError, type ParsedError } from "@/lib/errors";
 
 const FACTORY = process.env.NEXT_PUBLIC_FACTORY as `0x${string}`;
 
@@ -43,7 +44,7 @@ export default function CreateCampaignPage() {
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const [uploadStep, setUploadStep] = useState<UploadStep>("idle");
   const [txHash, setTxHash]         = useState<string | null>(null);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<ParsedError | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -67,6 +68,7 @@ export default function CreateCampaignPage() {
 
   async function create() {
     setUploadError(null);
+    setTxHash(null);
     try {
       // 1. Upload photo (optional)
       let imageCID = "";
@@ -99,7 +101,11 @@ export default function CreateCampaignPage() {
       setTitle(""); setDescription(""); setTarget(""); setDays("");
       setPhotoFile(null); setPhotoPreview(null);
     } catch (err) {
-      setUploadError(err instanceof Error ? err.message : "Unexpected error");
+      const parsed = parseError(err);
+      // Silent dismiss — don't show an error banner for intentional cancels
+      if (parsed.category !== "user-rejected") {
+        setUploadError(parsed);
+      }
       setUploadStep("idle");
     }
   }
@@ -142,8 +148,15 @@ export default function CreateCampaignPage() {
 
       {/* Error */}
       {uploadError && (
-        <div style={{ padding: "14px 18px", borderRadius: "var(--radius-md)", background: "rgba(244,63,94,0.08)", border: "1px solid rgba(244,63,94,0.25)", marginBottom: 24, fontSize: 14, color: "var(--red)" }}>
-          {uploadError}
+        <div style={{ padding: "14px 18px", borderRadius: "var(--radius-md)", background: "rgba(244,63,94,0.08)", border: "1px solid rgba(244,63,94,0.25)", marginBottom: 24 }}>
+          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--red)", marginBottom: uploadError.hint ? 4 : 0 }}>
+            ✕ {uploadError.message}
+          </div>
+          {uploadError.hint && (
+            <div style={{ fontSize: 13, color: "var(--text-secondary)" }}>
+              {uploadError.hint}
+            </div>
+          )}
         </div>
       )}
 
