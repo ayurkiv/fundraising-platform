@@ -1,10 +1,12 @@
-type Campaign @entity(immutable: true) {
+type Campaign @entity(immutable: false) {
   id: ID!
   owner: Bytes!
   targetAmount: BigInt!
   deadline: BigInt!
   metadataCID: String!
   createdAtBlock: BigInt!
+  totalRaised: BigInt!
+  donations: [Donation!]! @derivedFrom(field: "campaign")
 }
 
 type Donation @entity(immutable: true) {
@@ -13,4 +15,6 @@ type Donation @entity(immutable: true) {
   from: Bytes!
   amount: BigInt!
   blockNumber: BigInt!
+  timestamp: BigInt!
+  txHash: Bytes!
 }

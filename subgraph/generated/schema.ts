@@ -115,6 +115,27 @@ export class Campaign extends Entity {
   set createdAtBlock(value: BigInt) {
     this.set("createdAtBlock", Value.fromBigInt(value));
   }
+
+  get totalRaised(): BigInt {
+    let value = this.get("totalRaised");
+    if (!value || value.kind == ValueKind.NULL) {
+      throw new Error("Cannot return null for a required field.");
+    } else {
+      return value.toBigInt();
+    }
+  }
+
+  set totalRaised(value: BigInt) {
+    this.set("totalRaised", Value.fromBigInt(value));
+  }
+
+  get donations(): DonationLoader {
+    return new DonationLoader(
+      "Campaign",
+      this.get("id")!.toString(),
+      "donations",
+    );
+  }
 }
 
 export class Donation extends Entity {
@@ -206,5 +227,49 @@ export class Donation extends Entity {
 
   set blockNumber(value: BigInt) {
     this.set("blockNumber", Value.fromBigInt(value));
+  }
+
+  get timestamp(): BigInt {
+    let value = this.get("timestamp");
+    if (!value || value.kind == ValueKind.NULL) {
+      throw new Error("Cannot return null for a required field.");
+    } else {
+      return value.toBigInt();
+    }
+  }
+
+  set timestamp(value: BigInt) {
+    this.set("timestamp", Value.fromBigInt(value));
+  }
+
+  get txHash(): Bytes {
+    let value = this.get("txHash");
+    if (!value || value.kind == ValueKind.NULL) {
+      throw new Error("Cannot return null for a required field.");
+    } else {
+      return value.toBytes();
+    }
+  }
+
+  set txHash(value: Bytes) {
+    this.set("txHash", Value.fromBytes(value));
+  }
+}
+
+export class DonationLoader extends Entity {
+  _entity: string;
+  _field: string;
+  _id: string;
+
+  constructor(entity: string, id: string, field: string) {
+    super();
+    this._entity = entity;
+    this._id = id;
+    this._field = field;
+  }
+
+  load(): Donation[] {
+    let value = store.loadRelated(this._entity, this._id, this._field);
+    return changetype<Donation[]>(value);
   }
 }
