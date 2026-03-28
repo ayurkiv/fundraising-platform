@@ -1,11 +1,10 @@
 "use client";
 
 import { useAccount, useConnect, useDisconnect } from "wagmi";
-import { injected } from "wagmi/connectors";
 
 export function WalletButton() {
   const { address, isConnected } = useAccount();
-  const { connect, isPending } = useConnect();
+  const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
 
   if (isConnected && address) {
@@ -18,10 +17,14 @@ export function WalletButton() {
     );
   }
 
+  // Prefer WalletConnect (shows QR), fallback to first available
+  const wcConnector = connectors.find((c) => c.id === "walletConnect");
+  const connector = wcConnector ?? connectors[0];
+
   return (
     <button
       className="wallet-btn wallet-btn-connect"
-      onClick={() => connect({ connector: injected() })}
+      onClick={() => connector && connect({ connector })}
       disabled={isPending}
     >
       {isPending ? (
