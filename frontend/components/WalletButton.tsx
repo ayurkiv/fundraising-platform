@@ -1,10 +1,10 @@
 "use client";
 
-import { useAccount, useConnect, useDisconnect } from "wagmi";
+import { useAccount, useDisconnect } from "wagmi";
+import { getAppKit } from "@/lib/wagmi";
 
 export function WalletButton() {
   const { address, isConnected } = useAccount();
-  const { connect, connectors, isPending } = useConnect();
   const { disconnect } = useDisconnect();
 
   if (isConnected && address) {
@@ -17,30 +17,21 @@ export function WalletButton() {
     );
   }
 
-  // Prefer WalletConnect (shows QR), fallback to first available
-  const wcConnector = connectors.find((c) => c.id === "walletConnect");
-  const connector = wcConnector ?? connectors[0];
+  const handleConnect = () => {
+    const appKit = getAppKit();
+    appKit.open();
+  };
 
   return (
     <button
       className="wallet-btn wallet-btn-connect"
-      onClick={() => connector && connect({ connector })}
-      disabled={isPending}
+      onClick={handleConnect}
     >
-      {isPending ? (
-        <>
-          <span className="spinner" />
-          Connecting…
-        </>
-      ) : (
-        <>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <path d="M20 12V8H6a2 2 0 0 1 0-4h14v4"/>
-            <path d="M20 12v4H6a2 2 0 0 0 0 4h14v-4"/>
-          </svg>
-          Connect Wallet
-        </>
-      )}
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+        <path d="M20 12V8H6a2 2 0 0 1 0-4h14v4"/>
+        <path d="M20 12v4H6a2 2 0 0 0 0 4h14v-4"/>
+      </svg>
+      Connect Wallet
     </button>
   );
 }

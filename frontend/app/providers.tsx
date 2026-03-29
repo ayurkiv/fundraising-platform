@@ -1,5 +1,7 @@
 "use client";
 
+import "@/lib/appkit"; // Initialize AppKit before any hooks
+
 import { ApolloProvider } from "@apollo/client";
 import { apolloClient } from "@/lib/apolloClient";
 
