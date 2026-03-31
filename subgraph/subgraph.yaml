@@ -7,9 +7,9 @@ dataSources:
     name: CampaignFactory
     network: polygon-amoy
     source:
-      address: "0x786D1879f0b1d8ceE37D4e2adb96F757dEB2ED46"
+      address: "0x9E02129932dEcC5C6a9C68a06e29c7a082ab091d"
       abi: CampaignFactory
-      startBlock: 30877400
+      startBlock: 35924601
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.7
