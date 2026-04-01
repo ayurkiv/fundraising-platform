@@ -1,9 +1,10 @@
 "use client";
 
 import { useQuery } from "@apollo/client";
-import { GET_CAMPAIGNS } from "@/lib/queries";
+import { GET_MY_CAMPAIGNS, GET_MY_DONATIONS } from "@/lib/queries";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import { useAccount } from "wagmi";
 import { fetchMetadata, ipfsToHttp, type CampaignMetadata } from "@/lib/ipfs";
 
 type Campaign = {
@@ -16,12 +17,22 @@ type Campaign = {
   createdAtBlock: string;
 };
 
-type CampaignsData = {
+type Donation = {
+  id: string;
+  from: string;
+  amount: string;
+  timestamp: string;
+  txHash: string;
+  campaign: Campaign;
+};
+
+type MyCampaignsData = {
   campaigns: Campaign[];
 };
 
-type FilterStatus = "all" | "live" | "ended";
-type SortOption = "newest" | "most-funded" | "ending-soon";
+type MyDonationsData = {
+  donations: Donation[];
+};
 
 // ─── Helpers ─────────────────────────────────────────────
 function formatUSDC(value: string) {
@@ -44,6 +55,14 @@ function timeLeft(deadline: string): string {
 
 function shortAddr(addr: string) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function formatDate(timestamp: string) {
+  return new Date(Number(timestamp) * 1000).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
 
 // ─── Progress Bar ─────────────────────────────────────────
@@ -90,8 +109,6 @@ function CampaignCard({ c, meta, metaLoading }: { c: Campaign; meta: CampaignMet
 
         {/* Card body */}
         <div style={{ padding: "0" }}>
-
-          {/* Header */}
           <div className="campaign-card-header">
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="campaign-card-title" style={{ fontSize: 15, color: "var(--text-primary)", marginBottom: 2 }}>
@@ -108,7 +125,6 @@ function CampaignCard({ c, meta, metaLoading }: { c: Campaign; meta: CampaignMet
             </span>
           </div>
 
-          {/* Amount */}
           <div className="campaign-card-amounts">
             <div className="campaign-card-raised">
               {raised.toLocaleString()}<span>USDC</span>
@@ -116,10 +132,8 @@ function CampaignCard({ c, meta, metaLoading }: { c: Campaign; meta: CampaignMet
             <div className="campaign-card-target">of {target.toLocaleString()} USDC goal</div>
           </div>
 
-          {/* Progress */}
           <ProgressBar raised={raised} target={target} />
 
-          {/* Footer */}
           <div className="campaign-card-footer">
             <span>
               Owner:{" "}
@@ -130,31 +144,55 @@ function CampaignCard({ c, meta, metaLoading }: { c: Campaign; meta: CampaignMet
             <span>{timeLeft(c.deadline)}</span>
           </div>
         </div>
-
       </div>
     </Link>
   );
 }
 
 // ─── Page ─────────────────────────────────────────────────
-export default function HomePage() {
-  const { data, loading, error } = useQuery<CampaignsData>(GET_CAMPAIGNS);
+export default function MyCampaignsPage() {
+  const { address, isConnected } = useAccount();
 
-  const [search, setSearch] = useState("");
-  const [filter, setFilter] = useState<FilterStatus>("all");
-  const [sort, setSort] = useState<SortOption>("newest");
+  const ownerAddr = address?.toLowerCase() ?? "";
 
-  // Store metadata per campaign id
+  const {
+    data: campaignsData,
+    loading: campaignsLoading,
+  } = useQuery<MyCampaignsData>(GET_MY_CAMPAIGNS, {
+    variables: { owner: ownerAddr },
+    skip: !isConnected,
+  });
+
+  const {
+    data: donationsData,
+    loading: donationsLoading,
+  } = useQuery<MyDonationsData>(GET_MY_DONATIONS, {
+    variables: { from: ownerAddr },
+    skip: !isConnected,
+  });
+
+  // Metadata loading
   const [metaMap, setMetaMap] = useState<Record<string, CampaignMetadata | null>>({});
   const [metaLoadingSet, setMetaLoadingSet] = useState<Set<string>>(new Set());
 
-  const campaigns = data?.campaigns ?? [];
+  const myCampaigns = campaignsData?.campaigns ?? [];
+  const myDonations = donationsData?.donations ?? [];
 
-  // Fetch metadata for all campaigns
+  // Deduplicate donated campaigns
+  const donatedCampaigns = myDonations.reduce<Campaign[]>((acc, d) => {
+    if (!acc.find((c) => c.id === d.campaign.id)) {
+      acc.push(d.campaign);
+    }
+    return acc;
+  }, []);
+
+  // Collect all campaigns that need metadata
+  const allCampaigns = [...myCampaigns, ...donatedCampaigns];
+
   useEffect(() => {
-    if (campaigns.length === 0) return;
+    if (allCampaigns.length === 0) return;
 
-    const toFetch = campaigns.filter(
+    const toFetch = allCampaigns.filter(
       (c) => c.metadataCID && !(c.id in metaMap) && !metaLoadingSet.has(c.id)
     );
 
@@ -176,60 +214,32 @@ export default function HomePage() {
         });
       });
     });
-  }, [campaigns, metaMap, metaLoadingSet]);
+  }, [allCampaigns, metaMap, metaLoadingSet]);
 
-  // Filter, search, and sort
-  const filteredCampaigns = useMemo(() => {
-    let result = [...campaigns];
+  // Tab state
+  const [tab, setTab] = useState<"created" | "donated">("created");
 
-    // Status filter
-    if (filter === "live") {
-      result = result.filter((c) => !isExpired(c.deadline));
-    } else if (filter === "ended") {
-      result = result.filter((c) => isExpired(c.deadline));
-    }
-
-    // Search by title
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      result = result.filter((c) => {
-        const meta = metaMap[c.id];
-        if (!meta) return false;
-        return meta.title.toLowerCase().includes(q);
-      });
-    }
-
-    // Sort
-    if (sort === "newest") {
-      result.sort((a, b) => Number(b.createdAtBlock) - Number(a.createdAtBlock));
-    } else if (sort === "most-funded") {
-      result.sort((a, b) => Number(b.totalRaised) - Number(a.totalRaised));
-    } else if (sort === "ending-soon") {
-      result.sort((a, b) => Number(a.deadline) - Number(b.deadline));
-    }
-
-    return result;
-  }, [campaigns, filter, search, sort, metaMap]);
-
-  if (loading) {
+  if (!isConnected) {
     return (
       <main>
-        <div className="state-box">
-          <span className="state-icon">⟳</span>
-          <h3>Loading campaigns…</h3>
-          <p>Fetching on-chain data</p>
+        <div className="state-box" style={{ marginTop: 48 }}>
+          <span className="state-icon">◈</span>
+          <h3>Connect your wallet</h3>
+          <p>Connect your wallet to see your campaigns and donation history</p>
         </div>
       </main>
     );
   }
 
-  if (error) {
+  const isLoading = campaignsLoading || donationsLoading;
+
+  if (isLoading) {
     return (
       <main>
         <div className="state-box">
-          <span className="state-icon">✕</span>
-          <h3>Failed to load</h3>
-          <p>Could not connect to the subgraph</p>
+          <span className="state-icon">⟳</span>
+          <h3>Loading your campaigns…</h3>
+          <p>Fetching on-chain data</p>
         </div>
       </main>
     );
@@ -237,88 +247,46 @@ export default function HomePage() {
 
   return (
     <main>
-      {/* Hero */}
-      <div>
-        <h1 className="page-title">
-          Decentralized <span className="gradient-text">Fundraising</span>
-        </h1>
-        <p className="page-subtitle">
-          Support projects powered by smart contracts on Polygon Amoy
-        </p>
+      <h1 className="page-title">
+        My <span className="gradient-text">Campaigns</span>
+      </h1>
+      <p className="page-subtitle">
+        Campaigns you created and projects you supported
+      </p>
+
+      {/* Tabs */}
+      <div className="filter-bar" style={{ marginTop: 28 }}>
+        <div className="filter-btn-group">
+          <button
+            className={`filter-btn ${tab === "created" ? "filter-btn-active" : ""}`}
+            onClick={() => setTab("created")}
+          >
+            Created ({myCampaigns.length})
+          </button>
+          <button
+            className={`filter-btn ${tab === "donated" ? "filter-btn-active" : ""}`}
+            onClick={() => setTab("donated")}
+          >
+            Donated ({donatedCampaigns.length})
+          </button>
+        </div>
       </div>
 
-      {campaigns.length === 0 ? (
-        <div className="state-box" style={{ marginTop: 48 }}>
-          <span className="state-icon">◈</span>
-          <h3>No campaigns yet</h3>
-          <p>Connect your wallet and create the first campaign</p>
-        </div>
-      ) : (
+      {/* Created Campaigns Tab */}
+      {tab === "created" && (
         <>
-          {/* Search & Filters */}
-          <div className="search-filter-section" style={{ marginTop: 32 }}>
-            <div className="search-bar">
-              <span className="search-bar-icon">⌕</span>
-              <input
-                type="text"
-                className="search-bar-input"
-                placeholder="Search campaigns by title…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-              {search && (
-                <button
-                  className="search-bar-clear"
-                  onClick={() => setSearch("")}
-                  aria-label="Clear search"
-                >
-                  ✕
-                </button>
-              )}
+          {myCampaigns.length === 0 ? (
+            <div className="state-box" style={{ marginTop: 32 }}>
+              <span className="state-icon">◈</span>
+              <h3>No campaigns created</h3>
+              <p>
+                You have not created any campaigns yet.{" "}
+                <Link href="/create" style={{ color: "var(--purple)" }}>Create one now</Link>
+              </p>
             </div>
-
-            <div className="filter-bar">
-              <div className="filter-btn-group">
-                {(["all", "live", "ended"] as FilterStatus[]).map((f) => (
-                  <button
-                    key={f}
-                    className={`filter-btn ${filter === f ? "filter-btn-active" : ""}`}
-                    onClick={() => setFilter(f)}
-                  >
-                    {f === "all" ? "All" : f === "live" ? "Live" : "Ended"}
-                  </button>
-                ))}
-              </div>
-
-              <select
-                className="sort-select"
-                value={sort}
-                onChange={(e) => setSort(e.target.value as SortOption)}
-              >
-                <option value="newest">Newest</option>
-                <option value="most-funded">Most Funded</option>
-                <option value="ending-soon">Ending Soon</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Section header with count */}
-          <h2 className="section-title" style={{ marginTop: 28, marginBottom: 20 }}>
-            {filter === "live" ? "Live" : filter === "ended" ? "Ended" : "All"} Campaigns
-            <span style={{ marginLeft: 10, fontSize: 14, fontWeight: 500, color: "var(--text-muted)" }}>
-              ({filteredCampaigns.length})
-            </span>
-            {search && (
-              <span style={{ marginLeft: 6, fontSize: 13, fontWeight: 400, color: "var(--text-muted)" }}>
-                matching &ldquo;{search}&rdquo;
-              </span>
-            )}
-          </h2>
-
-          {/* Campaign Grid */}
-          {filteredCampaigns.length > 0 ? (
-            <div className="campaign-grid" style={{ marginTop: 20 }}>
-              {filteredCampaigns.map((c) => (
+          ) : (
+            <div className="campaign-grid" style={{ marginTop: 24 }}>
+              {myCampaigns.map((c) => (
                 <CampaignCard
                   key={c.id}
                   c={c}
@@ -327,12 +295,63 @@ export default function HomePage() {
                 />
               ))}
             </div>
-          ) : (
+          )}
+        </>
+      )}
+
+      {/* Donated Campaigns Tab */}
+      {tab === "donated" && (
+        <>
+          {donatedCampaigns.length === 0 ? (
             <div className="state-box" style={{ marginTop: 32 }}>
-              <span className="state-icon">⌕</span>
-              <h3>No campaigns found</h3>
-              <p>Try adjusting your search or filters</p>
+              <span className="state-icon">◈</span>
+              <h3>No donations yet</h3>
+              <p>
+                You have not donated to any campaigns yet.{" "}
+                <Link href="/" style={{ color: "var(--purple)" }}>Browse campaigns</Link>
+              </p>
             </div>
+          ) : (
+            <>
+              <div className="campaign-grid" style={{ marginTop: 24 }}>
+                {donatedCampaigns.map((c) => (
+                  <CampaignCard
+                    key={c.id}
+                    c={c}
+                    meta={metaMap[c.id] ?? null}
+                    metaLoading={metaLoadingSet.has(c.id) || (!!c.metadataCID && !(c.id in metaMap))}
+                  />
+                ))}
+              </div>
+
+              {/* Donation history */}
+              <h2 className="section-title" style={{ marginTop: 48 }}>
+                Donation History
+                <span style={{ marginLeft: 10, fontSize: 13, fontWeight: 500, color: "var(--text-muted)" }}>
+                  ({myDonations.length})
+                </span>
+              </h2>
+              <div className="donation-list">
+                {myDonations.map((d) => {
+                  const meta = metaMap[d.campaign.id];
+                  return (
+                    <Link key={d.id} href={`/campaign/${d.campaign.id}`} className="card-link">
+                      <div className="donation-item">
+                        <div>
+                          <div style={{ fontSize: 14, fontWeight: 600, color: "var(--text-primary)" }}>
+                            {meta?.title || shortAddr(d.campaign.id)}
+                          </div>
+                          <div className="donation-time">{formatDate(d.timestamp)}</div>
+                        </div>
+                        <div className="donation-amount">
+                          {formatUSDC(d.amount).toLocaleString()} USDC
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            </>
           )}
         </>
       )}

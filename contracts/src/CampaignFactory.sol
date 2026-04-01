@@ -24,8 +24,6 @@ contract CampaignFactory {
         uint256 deadline,
         string calldata metadataCID
     ) external returns (address) {
-        require(campaignOf[msg.sender] == address(0), "Already exists");
-
         Campaign campaign = new Campaign(
             msg.sender,
             usdc,

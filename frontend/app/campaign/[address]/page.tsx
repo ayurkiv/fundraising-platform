@@ -3,9 +3,10 @@
 import { useQuery } from "@apollo/client";
 import { GET_CAMPAIGN } from "@/lib/queries";
 import { useParams } from "next/navigation";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useDonate } from "@/hooks/useDonate";
 import { useAccount } from "wagmi";
+import Link from "next/link";
 import { fetchMetadata, ipfsToHttp, type CampaignMetadata } from "@/lib/ipfs";
 
 type Donation = {
@@ -43,6 +44,31 @@ function timeLeft(deadline: string): string {
   return `${h}h ${m}m remaining`;
 }
 
+// ─── Donor Leaderboard Types ─────────────────────────────
+type LeaderboardEntry = {
+  address: string;
+  total: number;
+  rank: number;
+};
+
+function buildLeaderboard(donations: Donation[]): LeaderboardEntry[] {
+  const totals = new Map<string, number>();
+  for (const d of donations) {
+    totals.set(d.from, (totals.get(d.from) || 0) + formatUSDC(d.amount));
+  }
+  return Array.from(totals.entries())
+    .map(([address, total]) => ({ address, total, rank: 0 }))
+    .sort((a, b) => b.total - a.total)
+    .map((entry, i) => ({ ...entry, rank: i + 1 }));
+}
+
+function rankMedal(rank: number): string {
+  if (rank === 1) return "\u{1F947}";
+  if (rank === 2) return "\u{1F948}";
+  if (rank === 3) return "\u{1F949}";
+  return `#${rank}`;
+}
+
 // ─── Progress Bar ─────────────────────────────────────────
 function ProgressBar({ raised, target }: { raised: number; target: number }) {
   const percent = Math.min((raised / target) * 100, 100);
@@ -71,12 +97,14 @@ export default function CampaignPage() {
   const { address } = useParams<{ address: string }>();
   const { address: wallet } = useAccount();
   const [amount, setAmount] = useState("");
+  const [copied, setCopied] = useState(false);
 
   // ✅ ALL HOOKS FIRST
   const { donate, loading: donating } = useDonate(address as `0x${string}`);
 
-  const { data, loading, error } = useQuery<CampaignData>(GET_CAMPAIGN, {
+  const { data, loading, error, refetch } = useQuery<CampaignData>(GET_CAMPAIGN, {
     variables: { id: address.toLowerCase() },
+    pollInterval: 10000,
   });
 
   const [meta, setMeta]               = useState<CampaignMetadata | null>(null);
@@ -91,6 +119,54 @@ export default function CampaignPage() {
       setMetaLoading(false);
     });
   }, [data?.campaign?.metadataCID]);
+
+  // ─── Share handlers ──────────────────────────────────────
+  const campaignUrl = typeof window !== "undefined"
+    ? window.location.href
+    : "";
+
+  const handleCopyLink = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(campaignUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // fallback
+      const input = document.createElement("input");
+      input.value = campaignUrl;
+      document.body.appendChild(input);
+      input.select();
+      document.execCommand("copy");
+      document.body.removeChild(input);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  }, [campaignUrl]);
+
+  const handleShareTwitter = useCallback(() => {
+    const title = meta?.title || "this campaign";
+    const text = encodeURIComponent(`Check out ${title} on FundChain!`);
+    const url = encodeURIComponent(campaignUrl);
+    window.open(
+      `https://twitter.com/intent/tweet?text=${text}&url=${url}`,
+      "_blank",
+      "noopener,noreferrer"
+    );
+  }, [campaignUrl, meta?.title]);
+
+  // ─── Donate with refetch ─────────────────────────────────
+  const handleDonate = useCallback(async () => {
+    await donate(Number(amount));
+    setAmount("");
+    // Refetch campaign data after successful donation
+    await refetch();
+  }, [donate, amount, refetch]);
+
+  // ─── Leaderboard memo ────────────────────────────────────
+  const leaderboard = useMemo(
+    () => (data?.campaign?.donations ? buildLeaderboard(data.campaign.donations) : []),
+    [data?.campaign?.donations]
+  );
 
   // ⬇️ EARLY RETURNS AFTER HOOKS
   if (loading) {
@@ -142,6 +218,24 @@ export default function CampaignPage() {
         </span>
       </div>
 
+      {/* Share buttons */}
+      <div className="share-buttons">
+        <button className="share-btn" onClick={handleCopyLink}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          {copied ? "Copied!" : "Copy Link"}
+        </button>
+        {copied && <span className="copied-feedback">Link copied to clipboard</span>}
+        <button className="share-btn" onClick={handleShareTwitter}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+          </svg>
+          Share on X
+        </button>
+      </div>
+
       {/* ── Metadata Hero ── */}
       {(metaLoading || meta) && (
         <div className="campaign-meta-hero">
@@ -172,10 +266,10 @@ export default function CampaignPage() {
           <div className="stat-label">Contract</div>
           <div className="stat-value mono">{shortAddr(c.id)}</div>
         </div>
-        <div className="stat-box">
+        <Link href={`/profile/${c.owner}`} className="stat-box" style={{ textDecoration: "none" }}>
           <div className="stat-label">Owner</div>
-          <div className="stat-value mono">{shortAddr(c.owner)}</div>
-        </div>
+          <div className="stat-value mono" style={{ color: "var(--cyan)" }}>{shortAddr(c.owner)}</div>
+        </Link>
       </div>
 
       {/* Progress card */}
@@ -206,7 +300,7 @@ export default function CampaignPage() {
               <button
                 className="btn btn-primary"
                 disabled={donating || !amount || Number(amount) <= 0}
-                onClick={() => donate(Number(amount))}
+                onClick={handleDonate}
                 style={{ minWidth: 120 }}
               >
                 {donating ? <><span className="spinner" /> Processing</> : "Donate"}
@@ -241,6 +335,26 @@ export default function CampaignPage() {
           <span className="state-icon" style={{ fontSize: 32 }}>◈</span>
           <h3 style={{ fontSize: 16 }}>No donations yet</h3>
           <p>Be the first to support this campaign</p>
+        </div>
+      )}
+
+      {/* Top Donors Leaderboard */}
+      {leaderboard.length > 0 && (
+        <div className="card" style={{ marginTop: 24 }}>
+          <h2 className="section-title">Top Donors</h2>
+          <div className="leaderboard">
+            {leaderboard.slice(0, 10).map((entry) => (
+              <Link key={entry.address} href={`/profile/${entry.address}`} className="leaderboard-item" style={{ textDecoration: "none" }}>
+                <div className="leaderboard-rank">
+                  {rankMedal(entry.rank)}
+                </div>
+                <div className="leaderboard-address mono">{shortAddr(entry.address)}</div>
+                <div className="leaderboard-amount">
+                  {entry.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} USDC
+                </div>
+              </Link>
+            ))}
+          </div>
         </div>
       )}
     </main>

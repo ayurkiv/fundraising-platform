@@ -11,7 +11,7 @@ export { projectId };
 const metadata = {
   name: "FundChain",
   description: "Decentralized Fundraising Platform",
-  url: typeof window !== "undefined" ? window.location.origin : "https://fundchain.app",
+  url: typeof window !== "undefined" ? window.location.origin : (process.env.NEXT_PUBLIC_APP_URL ?? "https://fundchain.app"),
   icons: ["/logo.svg"],
 };
 

@@ -1,6 +1,7 @@
 import "./globals.css";
 import { Providers } from "./providers";
 import { Navbar } from "@/components/Navbar";
+import { NetworkGuard } from "@/components/NetworkGuard";
 
 export const metadata = {
   title: "FundChain — Decentralized Fundraising",
@@ -21,6 +22,7 @@ export default function RootLayout({
       <body>
         <Providers>
           <Navbar />
+          <NetworkGuard />
           {children}
         </Providers>
       </body>
